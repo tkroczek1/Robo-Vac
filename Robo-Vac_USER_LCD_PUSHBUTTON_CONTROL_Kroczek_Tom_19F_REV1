@@ -1,0 +1,429 @@
+/*File Name: Robo-Vac_USER_LCD_PUSHBUTTON_CONTROL_Kroczek_Tom_19F
+Author: Tom Kroczek
+Date: 11/4/2017
+Modified:
+© Tom Kroczek, 2019
+Description: This code is used to control the LCD Screen using 3 pushbuttons to cycle through the 4 menus which
+//           the main menu, the vacuuming menu, power down menu. From these menus you are able to fully control
+//           the vehicle
+*/
+
+#include "mbed.h"
+#include "TextLCD.h"
+#define FULLSCALEVALUE 0xffff
+#define VMAX 3.3
+#define OFF 0
+#define ON 1
+#define PBPRESSED 0
+#define UNPBPRESSED 1 
+
+
+DigitalOut batteryChargeIndicator(LED1);
+TextLCD lcd(p30, p29, p28, p27, p26, p25, TextLCD::LCD20x4);                    // rs, e, d4-d7 pins, Type of LCD Screen
+AnalogIn buttonPressed(p19);
+AnalogIn batteryVoltage(p20);
+
+unsigned short buttonVoltage;                                               //button Voltage 
+float buttonVoltageRead;
+unsigned short batteryVoltageSingal;                                                   
+char menuNumber;
+
+typedef struct cursor cursor_t;
+typedef struct button button_t;
+
+    struct button{
+    char upButton;
+    char downButton;
+    char seletionButton;
+    };
+
+struct cursor{
+    char cursorPosition;
+    char cursorLocation;
+    char previousCursorPosition;
+    char cursorDown;
+    char cursorLowLimit;
+    char cursorHighLimit;
+    char menuNumber;
+    char switchMenu;
+    float batteryPercentMeasuredVoltage;
+    char batteryPercent;   
+    button_t buttonPressed;
+    };
+
+void emptyVacuumMenu(void);
+void introductionMenu(cursor_t *userNavigation);
+void mainMenu(cursor_t *userNavigation);
+void vacuumingMenu(cursor_t *userNavigation);
+void emptyVacuumMenu(cursor_t *userNavigation);
+void powerDownMenu(cursor_t *userNavigation);
+void lowPowerMenu(cursor_t *userNavigation);
+void batteryPercentageCalculator(cursor_t *userNavigation);
+
+char percentageSymbol = 0x25;                                              // '%' hex value for percentage
+char rightArrowButton = 0x3E;                                                 // Analog reading pin for 3 pushbuttons
+                                                                               //prints out voltages to PC
+int main() 
+{
+    cursor_t userNavigation; 
+    userNavigation.menuNumber = 1;
+    userNavigation.switchMenu = 0; //can switch through a menu
+    userNavigation.cursorLocation = 0; //add initializtion function
+    char buttonState = UNPBPRESSED;
+
+    while(1)
+        {
+        userNavigation.buttonPressed.seletionButton = 0;
+        buttonVoltage = buttonPressed.read_u16();
+        buttonVoltageRead = buttonVoltage/65535.0*3.3;
+        batteryVoltageSingal = batteryVoltage.read_u16(); // read in battery voltage
+        userNavigation.batteryPercentMeasuredVoltage = (batteryVoltageSingal /(float)FULLSCALEVALUE * VMAX); // convert to voltage out of 3.3V
+        batteryPercentageCalculator(&userNavigation);
+        
+        if(userNavigation.batteryPercent <= 15) 
+            {
+            userNavigation.menuNumber = 6;
+            }
+            
+        if((buttonVoltageRead > 2.125) && (buttonVoltageRead < 2.875))
+            {
+            userNavigation.buttonPressed.upButton = 1;
+            }
+        
+        if((buttonVoltageRead > 1.329) && (buttonVoltageRead < 1.797))
+            {
+            userNavigation.buttonPressed.downButton = 1;
+            userNavigation.switchMenu = 1; 
+            }
+        
+        if((buttonVoltageRead > .817) && (buttonVoltageRead < 1.105))
+            {
+            userNavigation.buttonPressed.seletionButton = 1;
+            }
+     
+        switch(userNavigation.menuNumber)
+            {
+                
+            case 1: 
+            introductionMenu(&userNavigation);    
+            break;
+
+            case 2: 
+            mainMenu(&userNavigation);
+            break;
+            
+            case 3:
+            vacuumingMenu(&userNavigation);
+            break;
+            
+            case 4:
+            emptyVacuumMenu(&userNavigation);
+            break;
+            
+            case 5:
+            powerDownMenu(&userNavigation);
+            break;
+            
+            case 6:
+            lowPowerMenu(&userNavigation);
+            break;
+            
+            default:
+            break;
+            }
+        }
+}
+
+void batteryPercentageCalculator(cursor_t *userNavigation)
+{
+    if(userNavigation-> batteryPercentMeasuredVoltage > 1.932)
+        {
+        userNavigation-> batteryPercent = 100;
+        batteryChargeIndicator = OFF;
+        }
+    else if(userNavigation-> batteryPercentMeasuredVoltage > 1.7)
+        {
+         userNavigation-> batteryPercent = 75; 
+         batteryChargeIndicator = OFF;
+        }
+    
+    else if(userNavigation-> batteryPercentMeasuredVoltage > 1.45)
+        {
+         userNavigation-> batteryPercent = 50; 
+         batteryChargeIndicator = OFF; 
+        }
+
+    else if(userNavigation-> batteryPercentMeasuredVoltage > 1.35)
+        {
+         userNavigation-> batteryPercent = 25;
+         batteryChargeIndicator = OFF;  
+        }
+    
+    else if(userNavigation-> batteryPercentMeasuredVoltage <= 1.35)
+        {
+         userNavigation-> batteryPercent = 15; 
+         batteryChargeIndicator = ON; 
+        } 
+}
+
+void lowPowerMenu(cursor_t *userNavigation)
+{
+    
+    lcd.cls();                                                              //clear lcd screen and moves cursor to (0,0)
+    lcd.locate(0,0);                                                        //Moves cusor to (4,1)
+    lcd.printf("Low Power Mode: <15%");
+    lcd.locate(5,1);                                                        //Moves cusor to (4,1)
+    lcd.printf("Power Down");
+    lcd.locate(1,2);                                                        //Moves cusor to (4,1)
+    lcd.printf("Charge the Battery");
+    userNavigation ->switchMenu = 1;
+    wait(.5);
+        
+    if((userNavigation-> batteryPercent > 15) && (userNavigation ->switchMenu == 1))
+        {
+        userNavigation -> menuNumber = 2;
+        userNavigation ->switchMenu = 0;
+        } 
+}
+
+void introductionMenu(cursor_t *userNavigation)
+{
+    if((userNavigation -> buttonPressed.seletionButton == 0) &&
+        (userNavigation ->switchMenu == 0))
+        {
+        lcd.cls();                                                              //clear lcd screen and moves cursor to (0,0)
+        lcd.locate(4,1);                                                        //Moves cusor to (4,1)
+        lcd.printf("Hello There!");                                             //prints to LCD
+        wait(2);
+        lcd.cls();  
+        lcd.locate(3,0);
+        lcd.printf("I am Robo-Vac.");
+        lcd.locate(0,1);
+        lcd.printf("Your Cleaning Robot.");
+        lcd.locate(3,3);
+        lcd.printf("By: TK, YZ, XJ");
+        wait(5);
+        lcd.cls();
+        lcd.locate(1,1);
+        lcd.printf("Press %c to Start.", rightArrowButton);                    
+        lcd.locate(7,3);
+        lcd.printf("Battery: %d%c",userNavigation-> batteryPercent, percentageSymbol );
+        wait(1);
+        userNavigation ->switchMenu = 1;
+        }
+    if((userNavigation -> buttonPressed.seletionButton == 1) &&
+        (userNavigation ->switchMenu == 1))                 
+        {
+        userNavigation -> menuNumber++;
+        userNavigation ->switchMenu = 0;
+        userNavigation ->buttonPressed.seletionButton = 0;
+        }      
+}
+
+void mainMenu(cursor_t *userNavigation)
+{   
+   
+    if(userNavigation ->switchMenu == 0)
+        {
+        userNavigation->cursorLocation = 0;
+        lcd.cls();
+        lcd.locate(0,0);
+        lcd.printf("Main");
+        lcd.locate(6,0);
+        lcd.printf("Begin Cleaning");
+        lcd.locate(0,1);
+        lcd.printf("Menu");
+        lcd.locate(6,1);
+        lcd.printf("Empty Vacuum");
+        lcd.locate(6,2);
+        lcd.printf("Power Down");
+        lcd.locate(7,3);
+        lcd.printf("Battery: %d%c",userNavigation-> batteryPercent, percentageSymbol );
+        lcd.locate(5,0);
+        lcd.printf("%c",rightArrowButton);
+        wait(1);
+        userNavigation ->switchMenu = 1;
+        userNavigation ->buttonPressed.seletionButton = 0;
+        }
+    
+    if((userNavigation ->cursorLocation < 2) &&
+       (userNavigation ->switchMenu ==1) &&
+       (userNavigation ->buttonPressed.downButton == 1))
+        {
+        userNavigation ->cursorLocation++;
+        userNavigation ->previousCursorPosition = userNavigation ->cursorLocation - 1;
+        lcd.locate(5,userNavigation ->cursorLocation);
+        lcd.printf("%c",rightArrowButton);
+        lcd.locate(5,userNavigation ->previousCursorPosition);                       //prints cursor '>' below old line                                     
+        lcd.printf(" ");
+        userNavigation ->buttonPressed.downButton = 0; 
+        wait(1);                                                                  //prints blank space for the cursor on old 
+        }
+        
+    else if((userNavigation ->cursorLocation > 0)&&
+       (userNavigation ->switchMenu ==1) &&
+       (userNavigation ->buttonPressed.upButton == 1))
+        {
+        userNavigation ->cursorLocation--;
+        userNavigation ->previousCursorPosition = userNavigation ->cursorLocation + 1;
+        lcd.locate(5,userNavigation ->cursorLocation);
+        lcd.printf("%c",rightArrowButton);
+        lcd.locate(5,userNavigation ->previousCursorPosition);                       //prints cursor '>' below old line                                     
+        lcd.printf(" ");
+        userNavigation ->buttonPressed.upButton = 0; 
+        wait(1);
+        }
+ //   pc.printf("%d",userNavigation ->cursorLocation) ;  
+ //attempt to continue into a sub menu       
+  if((userNavigation ->switchMenu == 1) &&  (userNavigation ->buttonPressed.seletionButton == 1))
+    {
+       switch(userNavigation ->cursorLocation)
+           {
+            
+            case 0:
+            userNavigation -> menuNumber = 3 ;
+            userNavigation ->switchMenu = 0;
+            userNavigation ->buttonPressed.seletionButton =0;
+            break;
+            
+            case 1:
+            userNavigation -> menuNumber = 4 ;
+            userNavigation ->switchMenu = 0;
+            userNavigation ->buttonPressed.seletionButton =0;
+            break;
+            
+            case 2:
+            userNavigation -> menuNumber = 5;
+            userNavigation ->switchMenu = 0;
+            userNavigation ->buttonPressed.seletionButton =0;
+            break;
+            default:
+            break;
+            }
+    }   
+}
+
+void vacuumingMenu(cursor_t *userNavigation)
+{
+    if((userNavigation -> buttonPressed.seletionButton == 0) &&
+        (userNavigation ->switchMenu == 0))
+        {
+        lcd.cls();
+        lcd.locate(0,0);
+        lcd.printf("Cleaning In Progress");
+        lcd.locate(1,1);
+        lcd.printf("%cEnd Cleaning", rightArrowButton);
+        lcd.locate(7,3);
+        lcd.printf("Battery: %d%c",userNavigation-> batteryPercent, percentageSymbol);
+        wait(1);
+        userNavigation ->switchMenu = 1;
+        }
+        
+    if((userNavigation -> buttonPressed.seletionButton == 1) &&
+        (userNavigation ->switchMenu == 1))                 
+        {
+        userNavigation -> menuNumber--;
+        userNavigation ->switchMenu = 0;
+        userNavigation ->buttonPressed.seletionButton = 0;
+        } 
+      
+}
+
+void emptyVacuumMenu(cursor_t *userNavigation)
+{
+     if((userNavigation -> buttonPressed.seletionButton == 0) &&
+        (userNavigation ->switchMenu == 0))
+        {
+         lcd.cls();
+         lcd.locate(2,0);
+         lcd.printf("Empty The Vacuum");
+         lcd.locate(2,1);
+         lcd.printf("%cVacuum Emptied",rightArrowButton);
+         lcd.locate(7,3);
+         lcd.printf("Battery: %d%c",userNavigation-> batteryPercent, percentageSymbol);
+         wait(1);   
+         userNavigation ->switchMenu = 1;
+         }
+    if((userNavigation -> buttonPressed.seletionButton == 1) &&
+        (userNavigation ->switchMenu == 1))                 
+        {
+        userNavigation -> menuNumber= 2;
+        userNavigation ->switchMenu = 0;
+        userNavigation ->buttonPressed.seletionButton = 0;
+        } 
+}
+
+void powerDownMenu(cursor_t *userNavigation)
+{
+    if(userNavigation ->switchMenu == 0)
+        {
+        userNavigation ->cursorLocation = 0;
+        lcd.cls();
+       // userNavigation->cursorLocation = 0;
+        lcd.locate(0,0);
+        lcd.printf("Power");
+        lcd.locate(6,0);
+        lcd.printf("%cCancellation", rightArrowButton);
+        lcd.locate(0,1);
+        lcd.printf("Down");
+        lcd.locate(7,1);
+        lcd.printf("All Motors",rightArrowButton);
+        lcd.locate(7,2);
+        lcd.printf("Flip Switch",rightArrowButton);
+        lcd.locate(7,3);
+        lcd.printf("Battery: %d%c",userNavigation-> batteryPercent, percentageSymbol);
+        
+        wait(1);
+        userNavigation ->switchMenu = 1;
+        userNavigation ->buttonPressed.seletionButton = 0; 
+        }
+        
+    if((userNavigation ->cursorLocation < 1) &&
+       (userNavigation ->switchMenu ==1) &&
+       (userNavigation ->buttonPressed.downButton == 1))
+        {
+        
+        userNavigation ->cursorLocation++;
+        userNavigation ->previousCursorPosition = userNavigation ->cursorLocation - 1;
+        lcd.locate(6,userNavigation ->cursorLocation);
+        lcd.printf("%c",rightArrowButton);
+        lcd.locate(6,userNavigation ->previousCursorPosition);                       //prints cursor '>' below old line                                     
+        lcd.printf(" ");
+        userNavigation ->buttonPressed.downButton = 0; 
+        wait(1);                                                                  //prints blank space for the cursor on old 
+        }
+        
+    else if((userNavigation ->cursorLocation > 0)&&
+       (userNavigation ->switchMenu ==1) &&
+       (userNavigation ->buttonPressed.upButton == 1))
+        {
+        userNavigation ->cursorLocation--;
+        userNavigation ->previousCursorPosition = userNavigation ->cursorLocation + 1;
+        lcd.locate(6,userNavigation ->cursorLocation);
+        lcd.printf("%c",rightArrowButton);
+        lcd.locate(6,userNavigation ->previousCursorPosition);                       //prints cursor '>' below old line                                     
+        lcd.printf(" ");
+        userNavigation ->buttonPressed.upButton = 0; 
+        wait(1);
+        }
+      
+    if((userNavigation ->switchMenu == 1) &&  (userNavigation ->buttonPressed.seletionButton == 1))
+    {
+       switch(userNavigation ->cursorLocation)
+       {
+        case 0:
+        userNavigation -> menuNumber = 2 ;
+        userNavigation ->switchMenu = 0;
+        userNavigation ->buttonPressed.seletionButton =0;
+        break;
+        
+        case 1:
+        pc.printf("POWERING DOWN MOTORS\n\r");
+        break;
+        default:
+        break;
+        }
+    } 
+}
+
+        
