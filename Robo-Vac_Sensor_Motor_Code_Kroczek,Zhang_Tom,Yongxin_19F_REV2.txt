@@ -1,0 +1,467 @@
+/****************************************************************************************************************
+Project name: Robo-Vac_Sensor_Motor_Code_Kroczek,Zhang_Tom,Yongxin_19F
+Author: Tom Kroczek, Yongxin Zhang
+Date: 12/06/2019
+Revision: 2
+Description: This Code Contains all the Code for Robo-Vac. The combination of the sensor & motor drive, user controlled
+             LCD Code, and battery percentage allows the user to operate Robo-Vac. This will allow Robo-Vac to dodge 
+             obstacles moving, will vacuum the surface underneath it, and will give the user full control and status 
+             of the battery percentage of the system. 
+****************************************************************************************************************/
+
+#include "mbed.h"
+#include "stdlib.h"
+#include "time.h"
+#include "Serial.h"
+
+char state;
+char iflocked;
+int FRONT, LEFT, RIGHT, LEFTBOTTEM, RIGHTBOTTEM;
+int motionCount;
+
+Serial pc(USBTX,USBRX);
+
+DigitalOut trigger[]={p5,p7,p9,p11,p13};            //5 ultrasonic sensor trigger define
+DigitalOut myled1(LED1); //monitor trigger
+DigitalOut myled2(LED2); //monitor echo
+DigitalIn  echo[]={p6,p8,p10,p12,p14};
+
+PwmOut PWMA(p21);                                   //Controls Motor A PWM
+PwmOut PWMV(p23);                                   //Controls Vacuum PWM
+PwmOut PWMB(p24);                                   //Controls Motor B PWM
+
+DigitalOut AIN2(p17);   // CW Motor A Movement, + Polarity, Controls Motor A in the forward direction
+DigitalOut AIN1(p18);   // CCW Motor  A Movement, - Polarity, Controls Motor A in the reverse direction
+DigitalOut STDBY(p22);  // H-Bridge functions when pull down resistor is actively pulled high 
+DigitalOut BIN2(p15);   // CCW Movement, CCW Motor B Movement, + Polarity, Controls Motor B in the forward direction
+DigitalOut BIN1(p16);   // CW  Movement, CW  Motor B Movement, - Polarity, Controls Motor B in the reverse direction
+
+Timer sonar[2];
+
+#define MOVEFORWARD 5
+#define MOVEBACKWARD 10
+#define TURNLEFT 15
+#define TURNRIGHT 20
+#define STOPRUNNING 0
+#define SENSORNUM 5
+#define ON 1
+#define OFF 0
+
+#define LOCKED 1
+
+void moveFwd(void);
+void moveBack(void);
+void moveLeft(void);
+void moveRight(void);
+void stop(void);
+int  senorMeasuring(int);
+void motionDecision();
+void motionChange();
+void onTick();
+void locate(int column, int row) {
+    // Cursor Home    <ESC>[{ROW};{COLUMN}H
+    printf("\033[%d;%dH%c", row + 1, column + 1);
+}
+
+// Function Name: continueMoving
+//Description: use counter in the interrupt to generate time period of (MotionCount*60)ms
+//Input: MotionCount
+//Output:time in ms
+int continueMoving(int MotionCount)
+    {
+    int motionTime = MotionCount*60;
+    return motionTime;
+    }//time(ms) = MotionCount*60 
+// End of continueMoving
+
+Ticker myTicker; // interrupt for sensors measuring, including function: onTick() which includings: senorMeasuring(int);                            
+
+main () 
+{   
+     myTicker.attach_us(&onTick,12000);
+   
+     while(true) 
+        { 
+        locate(0,0);
+        //printf("FRONT, LEFT, RIGHT, LEFTBOTTEM, RIGHTBOTTEM, motionCount\n\r%d     %d      %d      %d      %d      %d\n\r",FRONT, LEFT, RIGHT, LEFTBOTTEM,RIGHTBOTTEM,motionCount);
+        //manupulating ROBOVAC to move, or change the motion. including fuctions:
+        printf("motionCount\n\r%d\n\r",motionCount);
+        //manupulating ROBOVAC to move, or change the motion. including fuctions:
+        //moveFwd(void);moveBack(void);moveLeft(void);moveRight(void);stop(void);senorMeasuring(int);motionChange();
+        if (!iflocked)
+            {
+            motionDecision();
+            }
+    
+        else
+            {
+            motionChange();
+            }  
+                
+            switch(state)
+            {
+            
+            case MOVEFORWARD:
+                moveFwd();
+                printf("MOVEFORWARD\n\r");
+                break;
+                
+            case MOVEBACKWARD:
+                printf("MOVEBACKWARD\n\r");
+                moveBack();
+                break;
+            
+            case TURNLEFT:  
+                printf("TURNLEFT\n\r");           
+                moveLeft();
+                break;
+                
+            case TURNRIGHT:
+                printf("TURNRIGHT\n\r");
+                moveRight();
+                break;
+                
+            default:
+                printf("STOPMOVING\n\r");
+                stop();
+                break;  
+                }      
+        }
+}////****************end of main 
+
+//Function Name: senorMeasuring
+//Author: Yongxin Zhang
+//Date: 11/03/2019
+//Input: Sensor number
+//Output: distance
+//Description: Getting reading from sensor and pass it to the corresponding distance. Modified from https://os.mbed.com/components/HC-SR04/, which was for single ultrasonic sensor measurement. 
+//         This version is for accommdating 5 sensors.
+int senorMeasuring(int i)
+{   
+    int DIST;
+    int correction;
+    
+    sonar[0].reset();          
+// measure actual software polling timer delays
+// delay used later in time correction
+// start timer
+    sonar[0].start();
+// min software polling delay to read echo pin
+    while (echo[i]==2) 
+        {
+        if (sonar[0].read_us()>10)
+        break;
+        }
+    myled2 = 0;
+// stop timer
+    sonar[0].stop();
+// read timer
+    correction = sonar[0].read_us();
+    //printf("Approximate software overhead timer delay is %d uS\n\r",correction);
+       
+//Loop to read Sonar distance values, scale, and print
+    
+// trigger sonar to send a ping
+    trigger[i] = 1;
+    myled1 = 1;
+    myled2 = 0;
+    sonar[0].reset();
+    wait_us(10.0);
+    trigger[i] = 0;
+    myled1 = 0;
+//wait for echo high
+    while (echo[i]==0) 
+        {
+        if(sonar[0].read_us()>=6000)
+        break;
+        }
+    myled2=echo[i];
+//echo high, so start timer
+    sonar[0].start();
+//wait for echo low
+    while (echo[i]==1) 
+        {
+        if(sonar[0].read_us()>=6000)
+        break;
+        }
+//stop timer and read value
+    sonar[0].stop();
+//subtract software overhead timer delay and scale to cm
+    DIST = (sonar[0].read_us()-correction)/58.0;
+    myled2 = 0;
+    //printf(" dist%d is %d cm \n\r",i,distance);
+//wait so that any echo(s) return before sending another ping
+        //wait_us(10);
+    if(!(i%4))
+        {
+        motionCount++;
+        }
+        return DIST;
+} ////****************endofsensorMeasuring
+
+//Function Name: motionDecision
+//Author: Yongxin Zhang
+//Date: 11/03/2019
+//Input: None
+//Output: None
+//Description: Determine the motor actions based on the distance around the vehicle. 
+void motionDecision(){
+// State change conditions
+    
+    if(LEFTBOTTEM > 15)
+        {
+        state = MOVEBACKWARD;
+        iflocked = LOCKED;    
+        }
+
+    else if(RIGHTBOTTEM > 15)
+        {
+        state = MOVEBACKWARD;
+        iflocked = LOCKED;
+        }
+
+    else if(FRONT <= 20)
+        {   
+        if(LEFT >= RIGHT && LEFT>=20)
+            {    
+            state = TURNLEFT;
+            iflocked = LOCKED;                 
+            } 
+            
+        else if (RIGHT >= LEFT && RIGHT>=20)
+            {        
+            state = TURNRIGHT;  
+            iflocked = LOCKED;
+            }
+
+        else
+            {
+            state = MOVEBACKWARD;  
+            iflocked = LOCKED;        
+            } 
+        }
+
+        else
+            {
+            state = MOVEFORWARD;                 
+            }                                    
+   
+}////****************end of motionDecision
+
+//Function Name: motionChange
+//Author: Yongxin Zhang
+//Date: 11/03/2019
+//Input: None
+//Output: None
+//Description: Change the motor actions based on the distance around the vehicle.
+void motionChange()
+{
+    switch(state)
+    {
+        case MOVEBACKWARD:
+        while(motionCount> 30){    
+        if( LEFT >= RIGHT && LEFT>=15)
+        {    
+                state = TURNLEFT;
+                motionCount = 0;           
+        } 
+                
+        else if(RIGHT >= LEFT && RIGHT>=15) 
+        {   
+                state = TURNRIGHT; 
+                motionCount = 0;   
+        }
+        //motionCount = 0;
+        }
+
+        break;
+
+
+        case TURNLEFT:           
+        while(continueMoving(motionCount)> 1800){  
+        if(RIGHT<15 || FRONT >=30)
+        {
+                state = MOVEFORWARD; 
+                iflocked = 0;
+        }
+        motionCount = 0;
+        }
+        break;
+
+        case TURNRIGHT: 
+        while(continueMoving(motionCount)> 1800){                    
+        if(LEFT<15 || FRONT >=30)
+        {
+                state = MOVEFORWARD;
+                iflocked = 0;
+        }
+        motionCount = 0;
+        }
+        
+        break;
+    
+        default:
+        state = STOPRUNNING;
+        break;
+    }
+        
+}////****************end of motionChange
+
+
+//Function Name: onTick
+//Author: Yongxin Zhang
+//Date: 11/03/2019
+//Input: None
+//Output: None
+//Description: Interrupt for distance update every 60 ms.
+
+void onTick() 
+{
+    static char count;
+    count++;
+    count %= SENSORNUM;
+
+    switch(count)
+        {
+
+        case 0:
+            FRONT = senorMeasuring(count);
+            break;
+
+        case 1:
+            LEFT = senorMeasuring(count);
+            break;
+        case 2:
+            RIGHT = senorMeasuring(count);
+            break;
+        case 3:
+            LEFTBOTTEM = senorMeasuring(count);
+            break;
+        case 4:
+            RIGHTBOTTEM = senorMeasuring(count);
+            break;
+        
+        
+        default:
+        break;
+        
+    }
+}////****************end of OnTick
+
+/*    
+Function Name: moveBack
+Author: Tom Kroczek
+Date:9/25/2019
+Input:N/A
+Output:N/A
+Description: Motors are programed to operate with a .5 PWM Voltage Signal. AIN1 & BIN1 = 1 causes the the signal to switch interal mosfets 
+to produce a signal that is capable of setting the spinning motion of the motors in the Backwards diretion when STDBY pull down resistor is set to high logic
+Referancing: Logic Table https://learn.sparkfun.com/tutorials/tb6612fng-hookup-guide?_ga=2.244497413.1619793641.1569461243-1058473736.1550955095*/
+void moveBack(void)
+{
+    stop();
+    AIN1 = ON;      //Motor A Spins CCW which is the Reverse Direction
+    BIN1 = ON;      //Motor B Spins CW  which is the Reverse Direction
+    STDBY = ON;     // pull down resistor is 1
+    PWMA = .5;      // 1.65V PWM
+    PWMB = .5;
+    
+}////****************endofmoveBack
+
+/*   
+Function Name: moveFwd
+Author: Tom Kroczek
+Date:9/25/2019
+Input:N/A
+Output:N/A
+Description: Motors are programed to operate with a .4 PWM Voltage Signal. AIN2 & BIN2 = 1 causes the the signal to switch interal mosfets 
+to produce a signal that is capable of spinning the motors in the Reverse diretion when STDBY pull down resistor is set to high logic
+If the sensors detect that an object is within the limits of the Right or Left Sensor, the PWM Voltage for the respected motor will
+be adjusted accordingly to avoid corners of a wall. 
+Referancing: https://learn.sparkfun.com/tutorials/tb6612fng-hookup-guide?_ga=2.244497413.1619793641.1569461243-1058473736.1550955095*/
+void moveFwd (void)
+{
+    stop();                               //resets Motor Driver Pins to OFF
+    if(RIGHT<=8)                          //Sensor Feedback Allows Robo-Vac Motor A to Spin Faster with more Voltage 
+        {                                 //to move more Left to avoid objects   
+        PWMA = .5;
+        PWMB = .3;
+        }
+    else if(LEFT<=8)                      //Sensor Feedback Allows Robo-Vac Motor A to Spin Faster with more Voltage
+        {                                 //to move more Right to avoid objects 
+        PWMB = .5;
+        PWMA = .3;
+        }
+    else                                  //no Sensor Feedback Allows Robo-Vac To Move Fwd
+        {
+        PWMA = .4;                      
+        PWMB = .4;
+        }
+    STDBY = ON;
+    AIN2 = ON;                          //Motor A Spins in CW rotation which is the Forward Direction
+    BIN2 = ON;                          //Motor B Spins in CCW rotation which is the Forward Direction 
+    
+}////****************endofmoveFwd
+
+/*
+Function Name: moveLeft
+Author: Tom Kroczek
+Date:9/25/2019
+Input:N/A
+Output:N/A
+Description: Motors are programed to operate with a .5 PWM Signal. AIN2 & BIN1= 1 causes the the signal to switch interal mosfets 
+to produce a signal that is capable of spinning motor A in the forward direction and spinning motor B in the Reverse diretion when STDBY 
+pull down resistor is set to high logic. The two motor's spinning in opposite directions causes it to turn left.
+Referancing: https://learn.sparkfun.com/tutorials/tb6612fng-hookup-guide?_ga=2.244497413.1619793641.1569461243-1058473736.1550955095*/  
+void moveLeft(void)
+{
+    stop();
+    AIN2 = ON;   //Motor A Spins in the Forward Direction
+    BIN1 = ON;   //Motor B Spings in the Reverse Direction
+    STDBY = ON;
+    PWMA = .5;
+    PWMB = .5;
+    
+}////****************endofmoveLeft
+
+/*
+Function Name: moveRight
+Author: Tom Kroczek
+Date:9/25/2019
+Input:N/A
+Output:N/A
+Description: Motors are programed to operate with a .4 PWM Signal. AIN1 & AIN2= 1 causes the the signal to switch interal mosfets 
+to produce a signal that is capable of spinning motor A in the reverse direction and spinning motor B in the forward diretion when STDBY 
+pull down resistor is set to high logic. The two motor's spinning in opposite directions causes it to turn left. After 3 seconds of operarion, 
+PWM = 0 and the logic input to control the mosfets are = 0 along with the pull down resistor let to logic
+Referancing: https://learn.sparkfun.com/tutorials/tb6612fng-hookup-guide?_ga=2.244497413.1619793641.1569461243-1058473736.1550955095*/
+void moveRight(void)
+{
+    stop();
+    AIN1 = ON;   //Motor A Spins in the Reverse Direction
+    BIN2 = ON;   //Motor B Spings in the Forward Direction
+    STDBY = ON;
+    PWMA = .5;
+    PWMB = .5;   
+    
+}////****************endofmoveRight 
+
+/*
+Function Name: Stop
+Author: Tom Kroczek
+Date:9/25/2019
+Input:N/A
+Output:N/A
+Description: Both Motor A & Motor B PWM to 0, logic Controls are all set to 0 to Complerely turn off the motors
+Referancing: https://learn.sparkfun.com/tutorials/tb6612fng-hookup-guide?_ga=2.244497413.1619793641.1569461243-1058473736.1550955095*/
+void stop(void)
+{
+    PWMA = 0;
+    PWMB = 0;   
+    AIN1 = 0;   
+    AIN2 = 0;
+    BIN1 = 0; 
+    BIN2 = 0;   
+    STDBY = 0; 
+    
+}////****************endofstop
